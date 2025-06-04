@@ -1,0 +1,50 @@
+import numpy as np
+from tensorflow.keras.datasets import imdb
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+import ssl
+import certifi
+
+# Fix SSL certificate issue (for macOS)
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
+
+
+# Load IMDB dataset (top 10,000 most frequent words)
+(train_data, train_labels), (test_data, test_labels) = imdb.load_data(num_words=10000)
+
+# Pad sequences to ensure consistent input length
+train_data = pad_sequences(train_data, maxlen=256)
+test_data = pad_sequences(test_data, maxlen=256)
+
+# Show the shape of data
+print("Training data shape:", train_data.shape)
+print("Test data shape:", test_data.shape)
+
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+# Dummy example dataset
+X = np.random.randint(0, 2, (1000, 10, 8))  # shape: (samples, timesteps, features)
+y = np.random.randint(0, 2, (1000,))        # binary classification
+
+# Split dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# Convert input to float32 to avoid dropout scaling error
+X_train = X_train.astype("float32")
+X_test = X_test.astype("float32")
+
+# Model
+model = Sequential()
+model.add(LSTM(64, input_shape=(X_train.shape[1], X_train.shape[2]), dropout=0.2, recurrent_dropout=0.2))
+model.add(Dense(1, activation="sigmoid"))
+
+# Compile
+model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+
+# Train
+model.fit(X_train, y_train, batch_size=32, epochs=5, validation_data=(X_test, y_test))
