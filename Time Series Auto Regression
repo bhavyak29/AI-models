@@ -1,0 +1,129 @@
+# Import SSL and HTTP certificate modules to securely fetch remote data
+import certifi
+import urllib3
+
+# Create a secure HTTP pool with verified SSL certificates
+http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+
+# Import libraries to handle data and reading from URL
+import pandas as pd
+from io import StringIO
+
+# URL of the airline passenger dataset (CSV format)
+url = "https://gist.githubusercontent.com/ugallu/41063f14733e0de0d35cc86a1dc8461f/raw"
+
+# Send HTTP GET request to fetch the CSV file
+response = http.request('GET', url)
+
+# Read the response content into a pandas DataFrame
+df = pd.read_csv(StringIO(response.data.decode('utf-8')))
+df.info()
+
+# Convert 'Month' column to datetime format
+df['Month'] = pd.to_datetime(df['Month'])
+
+# Set 'Month' as index for time series operations
+df.set_index('Month', inplace=True)
+
+# Plot the time series of passenger data
+import matplotlib.pyplot as plt
+plt.figure(figsize=(10,6))
+plt.plot(df)
+plt.title("Airlines Passenger Data Over Years")
+plt.xlabel("Years")
+plt.ylabel("Passengers")
+plt.show()
+
+# Rename column to 'Passengers' for simplicity
+df.columns = ['Passengers']
+
+# Import ADF (Augmented Dickey-Fuller) test and check for stationarity
+from statsmodels.tsa.stattools import adfuller
+adf_result = adfuller(df['Passengers'])
+print("ADF statistics:", adf_result[0])
+print("P-value:", adf_result[1])
+print("Critical values:", adf_result[2:])
+
+# Create a new column with first-order differencing to help make series stationary
+df['stationary_series'] = df['Passengers'].diff()
+df.dropna(inplace=True)
+
+# Recheck stationarity after differencing
+adf_result = adfuller(df['stationary_series'])
+print("ADF statistics after 1st differencing:", adf_result[0])
+print("P-value:", adf_result[1])
+
+# Try second-order differencing
+df['stationary_series'] = df['Passengers'].diff().diff()
+
+# Drop the original 'Passengers' column for clean modeling
+df.drop(['Passengers'], axis=1, inplace=True)
+
+# Reload the dataset again (this part appears redundant but kept for flow)
+http = urllib3.PoolManager(cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())
+response = http.request('GET', url)
+df = pd.read_csv(StringIO(response.data.decode('utf-8')))
+
+# Convert problematic column to numeric and handle missing values
+df['International airline passengers: monthly totals in thousands. Jan 49 ? Dec 60'] = pd.to_numeric(
+    df['International airline passengers: monthly totals in thousands. Jan 49 ? Dec 60'],
+    errors='coerce'
+)
+
+# Rename columns to 'Month' and 'Passengers'
+df.columns = ['Month', 'Passengers']
+
+# Run ADF test again on original series
+adf_result = adfuller(df['Passengers'])
+print(adf_result)
+
+# Convert 'Month' column to datetime and set as index
+df['Month'] = pd.to_datetime(df['Month'])
+df.set_index('Month', inplace=True)
+
+# Time Series Decomposition and SARIMA Modeling
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Decompose the series into trend, seasonality, and residual
+decomposition = seasonal_decompose(df, model='multiplicative')
+trend = decomposition.trend
+seasonality = decomposition.seasonal
+residual = decomposition.resid
+
+# Build SARIMA model (1,1,1)x(1,1,1,12)
+model = SARIMAX(df['Passengers'], order=(1,1,1), seasonal_order=(1,1,1,12))
+result = model.fit()
+
+# Import error metrics
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
+
+# Predict values from model
+predicted_values = result.fittedvalues
+
+# Calculate error metrics
+mae = mean_absolute_error(df['Passengers'], predicted_values)
+mse = mean_squared_error(df['Passengers'], predicted_values)
+rmse = np.sqrt(mse)
+
+# Display error metrics
+print("Mean Absolute Error:", mae)
+print("Mean Squared Error:", mse)
+print("Root Mean Squared Error:", rmse)
+
+# Forecast for 24 future months (2 years)
+forecast_steps = 24
+future_forecast = result.get_forecast(steps=forecast_steps)
+future_index = pd.date_range(start=df.index[-1], periods=forecast_steps+1, freq='M')[1:]
+future_predicted_values = future_forecast.predicted_mean
+
+# Plot original data with forecast
+plt.figure(figsize=(10,6))
+plt.plot(df, label="Original")
+plt.plot(future_index, future_predicted_values, label="Forecast", color="red")
+plt.title("Airlines Passenger Forecast")
+plt.xlabel("Years")
+plt.ylabel("Passengers")
+plt.legend()
+plt.show()
