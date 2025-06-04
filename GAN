@@ -1,115 +1,101 @@
+# Import required modules from TensorFlow and Keras
 import tensorflow as tf
-from tensorflow.keras.layers import Conv1DTranspose
-from tensorflow.keras.layers import Concatenate, BatchNormalization, Activation, Flatten,  Multiply
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, BatchNormalization, LeakyReLU, Flatten, Reshape
+from tensorflow.keras import layers, models
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
-from tensorflow.keras.layers import Dense, Embedding, Reshape, Input 
-from tensorflow.keras.optimizers import Adam 
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras import layers, models 
-
-random_dim=100
-
-def build_generator():
-    model=Sequential()
-    model.add(Dense(256, activation="relu", input_dim=random_dim))
-    model.add(BatchNormalization())
-    model.add(Dense(512, activation="relu"))
-    model.add(BatchNormalization())
-    model.add(Dense(1024, activation="relu"))
-    model.add(BatchNormalization())
-    model.add(Dense(784, action="softmax"))
-    model.add(Reshape(28,28,1))
-    
-    noise=Input(Shape=(100, ))
-    label=Input(Shape=(1, ), dtype='int64')
-    label_embedding=Flattern()(Embedding(10,100)(label))
-    model_input=multiply([noise,label_embedding])
-    image=model(model_input)
-    
-    return model([noise,label],image)
-
-def build_discriminator():
-    model=Sequential()
-    model.add(Dense(1024, activation="relu", input_dim=784))
-    model.add(BatchNormalization())
-    model.add(Dense(512, activation="relu"))
-    model.add(BatchNormalization())
-    model.add(Dense(256, activation="relu"))
-    model.add(BatchNormalization())
-    model.add(Dense(1, activation="Sigmoid"))
-    
-    img=Input(Shape=(28,28,1))
-    label=Input(Shape=(1, ), dtype='int64')
-    label_embedding=Flattern()(Embedding(10, np.prod(28,28,1))(label))
-    flat_image=Flattern(img)
-    model_input=multiply([flat_image,label_embedding])
-    validity=model(model_input)
-    
-    return model([img,label],validity)
-
 import ssl
+
+# Disable SSL verification (for older macOS compatibility with dataset download)
 ssl._create_default_https_context = ssl._create_unverified_context
 
+# Load and preprocess the MNIST dataset
 (train_images, _), (_, _) = tf.keras.datasets.mnist.load_data()
 train_images = train_images.reshape(train_images.shape[0], 28, 28, 1).astype('float32')
 
+# -------------------------------
+# Define the Generator model
+# -------------------------------
 generator = models.Sequential()
-generator.add(layers.Dense(256, input_shape=(100,), use_bias=False))
+generator.add(layers.Dense(256, input_shape=(100,), use_bias=False))  # Input: 100-dim noise
 generator.add(layers.BatchNormalization())
 generator.add(layers.LeakyReLU(alpha=0.2))
-generator.add(layers.Dense(784, activation="softmax"))
-generator.add(layers.Reshape((28, 28, 1)))
+generator.add(layers.Dense(784, activation="softmax"))  # Output: flattened image
+generator.add(layers.Reshape((28, 28, 1)))  # Reshape to 28x28x1 image
 
-discriminator_optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.0001)
-discriminator=models.Sequential()
-discriminator.add(layers.Flatten(input_shape=(28, 28, 1)))
+# -------------------------------
+# Define the Discriminator model
+# -------------------------------
+discriminator = models.Sequential()
+discriminator.add(layers.Flatten(input_shape=(28, 28, 1)))  # Flatten input image
 discriminator.add(layers.Dense(128))
 discriminator.add(layers.LeakyReLU(alpha=0.2))
-discriminator.add(layers.Dense(1, activation="sigmoid"))
+discriminator.add(layers.Dense(1, activation="sigmoid"))  # Output: real or fake (binary)
+
+# Compile discriminator with RMSprop optimizer
+discriminator_optimizer = tf.keras.optimizers.RMSprop(learning_rate=0.0001)
 discriminator.compile(optimizer=discriminator_optimizer,
-    loss="binary_crossentropy",
-    metrics=["accuracy"])
+                      loss="binary_crossentropy",
+                      metrics=["accuracy"])
 
-discriminator.trainable=False
-gan=models.Sequential([generator,discriminator])
+# -------------------------------
+# Build the GAN model
+# -------------------------------
+discriminator.trainable = False  # Freeze discriminator during GAN training
 
-gan_optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.0001)
+gan = models.Sequential([generator, discriminator])
+gan_optimizer = tf.keras.optimizers.RMSprop(learning_rate=0.0001)
 gan.compile(optimizer=gan_optimizer, loss="binary_crossentropy")
 
-epochs=50
-batch_size=128
+# -------------------------------
+# Training Parameters
+# -------------------------------
+epochs = 50
+batch_size = 128
 
+# -------------------------------
+# GAN Training Loop
+# -------------------------------
 for epoch in range(epochs):
-    for _ in range(train_images.shape[0]//batch_size):
-        noise=np.random.normal(0,1,(batch_size,100)) #dimensions=100
-        fake_images=generator.predict(noise)
-        
-        real_images=train_images[np.random.randint(0,train_images.shape[0],batch_size)]
-        combined_images=np.concatenate([fake_images, real_images])
-        labels=np.concatenate([np.ones((batch_size,1)),np.zeros((batch_size,1))])
-        labels += 0.05*np.random.random(labels.shape)
-        d_loss=discriminator.train_on_batch(combined_images, labels)
-        noise=np.random.normal(0,1,(batch_size,100))
-        misleading_labels=np.zeros((batch_size,1))
-        g_loss=gan.train_on_batch(noise,misleading_labels)
-       
-    print(f"Epoch{epoch+1},D loss:{d_loss[0]},G loss:{g_loss}")
-    
-    
-    if(epoch+1)%10==0:
-        samples=generator.predict(np.random.normal(0,1,(16,100)))
-        samples=0.5*samples+0.05
-          
-        fig, axs = plt.subplots(4, 4)
-        count = 0
+    for _ in range(train_images.shape[0] // batch_size):
+        # Generate fake images
+        noise = np.random.normal(0, 1, (batch_size, 100))
+        fake_images = generator.predict(noise)
 
+        # Select a random batch of real images
+        real_images = train_images[np.random.randint(0, train_images.shape[0], batch_size)]
+
+        # Combine real and fake images
+        combined_images = np.concatenate([fake_images, real_images])
+
+        # Assign labels: 1 for fake, 0 for real (inverted intentionally for GAN logic)
+        labels = np.concatenate([np.ones((batch_size, 1)), np.zeros((batch_size, 1))])
+        labels += 0.05 * np.random.random(labels.shape)  # Add some label noise
+
+        # Train the discriminator
+        d_loss = discriminator.train_on_batch(combined_images, labels)
+
+        # Generate noise and misleading labels for generator training
+        noise = np.random.normal(0, 1, (batch_size, 100))
+        misleading_labels = np.zeros((batch_size, 1))  # Want generator to fool discriminator
+
+        # Train the generator (via GAN)
+        g_loss = gan.train_on_batch(noise, misleading_labels)
+
+    # Print losses per epoch
+    print(f"Epoch {epoch+1}, D loss: {d_loss[0]}, G loss: {g_loss}")
+
+    # Generate and show sample images every 10 epochs
+    if (epoch + 1) % 10 == 0:
+        samples = generator.predict(np.random.normal(0, 1, (16, 100)))
+        samples = 0.5 * samples + 0.05  # Optional rescaling for visualization
+
+        fig, axs = plt.subplots(4, 4, figsize=(6, 6))
+        count = 0
         for i in range(4):
             for j in range(4):
                 axs[i, j].imshow(samples[count], cmap='gray')
                 axs[i, j].axis('off')
                 count += 1
-
+        plt.tight_layout()
         plt.show()
